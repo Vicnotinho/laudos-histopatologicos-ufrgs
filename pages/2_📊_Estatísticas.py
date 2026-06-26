@@ -48,7 +48,10 @@ with c1:
          "Distribuição por gênero",
          "Localizações mais comuns",
          "Evolução de um diagnóstico por ano",
-         "Acerto clínico × histopatológico"],
+         "Acerto clínico × histopatológico",
+         "Idade por diagnóstico",
+         "Distribuição de idade (geral)",
+         "Tamanho dos fragmentos (volume)"],
     )
 with c2:
     ano_ini = st.selectbox("De:", anos, index=0)
@@ -173,3 +176,146 @@ elif analise == "Acerto clínico × histopatológico":
                     st.markdown(f"- Nº {num}: clínico *“{clin}”* → histo *“{histo}”*")
             else:
                 st.caption("Nenhum exemplo.")
+
+# ── Idade por diagnóstico ───────────────────────────────────────────────────
+elif analise == "Idade por diagnóstico":
+    st.caption("Quantos casos de um diagnóstico, e quantos caem numa faixa de idade.")
+    col_a, col_b = st.columns([2, 1])
+    with col_a:
+        termo = st.text_input("Diagnóstico:", placeholder="Ex: lipoma, carcinoma...")
+    with col_b:
+        campo = st.radio("Buscar em:", ["Histopatológico", "Clínico"], horizontal=True)
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        idade_min = st.number_input("Idade mínima:", min_value=0, max_value=120, value=0)
+    with c2:
+        idade_max = st.number_input("Idade máxima:", min_value=0, max_value=120, value=100)
+    with c3:
+        passo = st.number_input("Frequência (de quantos em quantos anos):", min_value=1, max_value=50, value=5)
+
+    if termo.strip():
+        campo_db = "histo" if campo == "Histopatológico" else "clinico"
+        r = banco.prevalencia_por_diagnostico(
+            termo, campo=campo_db,
+            idade_min=idade_min, idade_max=idade_max,
+            ano_ini=ano_ini, ano_fim=ano_fim,
+        )
+        if r["total"] == 0:
+            st.info(f"Nenhum caso de “{termo}” encontrado.")
+        else:
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric(f"Casos de “{termo}”", r["total"])
+            pct = round(100 * r["na_faixa"] / r["com_idade"], 1) if r["com_idade"] else 0
+            m2.metric(f"Entre {idade_min}-{idade_max} anos", f"{r['na_faixa']} ({pct}%)")
+            m3.metric("Idade média", f"{r['media_idade']} anos")
+            m4.metric("Faixa observada", f"{r['min_idade']}-{r['max_idade']}")
+            st.caption(f"({r['com_idade']} dos {r['total']} casos têm idade preenchida)")
+
+            if r["idades"]:
+                import pandas as pd
+                # agrupa pela frequência escolhida, dentro do intervalo min-max
+                faixas = {}
+                for i in r["idades"]:
+                    if idade_min <= i <= idade_max:
+                        ini = idade_min + ((i - idade_min) // passo) * passo
+                        chave = (ini, ini + passo - 1)
+                        faixas[chave] = faixas.get(chave, 0) + 1
+                if faixas:
+                    faixas_ord = sorted(faixas.items(), key=lambda x: x[0][0])
+                    df = pd.DataFrame(
+                        [(f"{a}-{b}", n) for (a, b), n in faixas_ord],
+                        columns=[f"Faixa etária (de {passo} em {passo} anos)", "Casos"],
+                    ).set_index(f"Faixa etária (de {passo} em {passo} anos)")
+                    st.markdown(f"**Distribuição de “{termo}” por idade:**")
+                    st.bar_chart(df)
+                else:
+                    st.info(f"Nenhum caso de “{termo}” entre {idade_min} e {idade_max} anos.")
+    else:
+        st.info("Digite um diagnóstico para analisar.")
+
+# ── Distribuição de idade (geral) ───────────────────────────────────────────
+elif analise == "Distribuição de idade (geral)":
+    st.caption("Escolha a faixa de idade e de quantos em quantos anos quer agrupar.")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        idade_min = st.number_input("Idade mínima:", min_value=0, max_value=120, value=0)
+    with c2:
+        idade_max = st.number_input("Idade máxima:", min_value=0, max_value=120, value=100)
+    with c3:
+        passo = st.number_input("Agrupar de quantos em quantos anos:", min_value=1, max_value=50, value=5)
+
+    if idade_min > idade_max:
+        idade_min, idade_max = idade_max, idade_min
+
+    r = banco.distribuicao_idade(ano_ini, ano_fim, idade_min=idade_min,
+                                 idade_max=idade_max, passo=passo)
+    if r["faixas"]:
+        import pandas as pd
+        df = pd.DataFrame(r["faixas"], columns=["Faixa etária", "Pacientes"]).set_index("Faixa etária")
+        st.bar_chart(df)
+        st.markdown(f"**Total entre {idade_min} e {idade_max} anos: {r['total']} pacientes**")
+        with st.expander("Ver tabela"):
+            st.dataframe(df, width='stretch')
+    else:
+        st.info("Nenhum paciente nessa faixa de idade.")
+
+# ── Tamanho dos fragmentos (volume) ─────────────────────────────────────────
+elif analise == "Tamanho dos fragmentos (volume)":
+    st.caption(
+        "Digite uma lesão para ver a distribuição dos tamanhos (volume em mm³) "
+        "dela. Só considera casos com as 3 dimensões (LxAxP)."
+    )
+    col_a, col_b = st.columns([2, 1])
+    with col_a:
+        termo = st.text_input("Lesão:", placeholder="Ex: Hiperplasia epitelial e hiperceratose")
+    with col_b:
+        campo = st.radio("Buscar em:", ["Histopatológico", "Clínico"], horizontal=True)
+
+    campo_db = "histo" if campo == "Histopatológico" else "clinico"
+
+    # frequência (agrupamento) — 0 = automática
+    freq = st.number_input(
+        "Agrupar de quantos em quantos mm³ (0 = automático):",
+        min_value=0, max_value=100000, value=0, step=100,
+    )
+
+    if not termo.strip():
+        st.info("Digite uma lesão para ver a distribuição dos tamanhos.")
+    else:
+        r = banco.distribuicao_volume_lesao(
+            termo, campo=campo_db, faixa=(freq if freq > 0 else None),
+            ano_ini=ano_ini, ano_fim=ano_fim,
+        )
+        if not r["casos"]:
+            st.info(f"Nenhum caso de “{termo}” com as 3 dimensões encontrado.")
+        else:
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Com volume", len(r["casos"]))
+            m2.metric("Menor", f"{r['min_vol']} mm³")
+            m3.metric("Maior", f"{r['max_vol']} mm³")
+            m4.metric("Média", f"{r['media_vol']} mm³")
+            st.caption(
+                f"({r['sem_3d']} casos de “{termo}” ficaram de fora por não ter as 3 medidas) "
+                f"· agrupamento usado: {int(r['faixa_usada'])} mm³"
+            )
+
+            import pandas as pd
+            # gráfico da distribuição (volumes mais comuns)
+            if r["faixas"]:
+                df_f = pd.DataFrame(r["faixas"], columns=["Faixa de volume (mm³)", "Casos"]).set_index("Faixa de volume (mm³)")
+                st.markdown("**Volumes mais comuns:**")
+                st.bar_chart(df_f)
+
+            # opção de ver as dimensões originais
+            ver = st.radio(
+                "Ver detalhes:",
+                ["Não mostrar", "Dimensões originais (ex: 22x2x10)", "Lista por volume"],
+                horizontal=True,
+            )
+            if ver == "Dimensões originais (ex: 22x2x10)":
+                df = pd.DataFrame(r["casos"], columns=["Nº registro", "Volume (mm³)", "Dimensões"])
+                st.dataframe(df[["Nº registro", "Dimensões"]], width='stretch', hide_index=True)
+            elif ver == "Lista por volume":
+                df = pd.DataFrame(r["casos"], columns=["Nº registro", "Volume (mm³)", "Dimensões"])
+                st.dataframe(df, width='stretch', hide_index=True)
