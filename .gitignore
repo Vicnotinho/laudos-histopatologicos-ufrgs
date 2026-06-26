@@ -1,0 +1,46 @@
+# ⚠️ PROTEÇÃO DE DADOS — NUNCA suba dados de pacientes (LGPD)
+# ──────────────────────────────────────────────────────────────
+
+# Banco de dados com dados reais de pacientes
+dados/
+*.db
+*.sqlite
+*.sqlite3
+
+# Arquivos do Access (dados reais)
+*.accdb
+*.mdb
+
+# CSVs e Excels que podem conter dados de pacientes
+*.csv
+laudos*.csv
+revisar_*.xlsx
+
+# Imagens de pacientes (fotomicrografias, fotos clínicas)
+imagens/
+*.jpg
+*.jpeg
+*.png
+!Logo-Odonto-UFRGS.png
+
+# Logs (registram nomes/ações)
+log.csv
+*.log
+
+# ── Python ──────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.streamlit/secrets.toml
+
+# ── Sistema ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Projeto separado (Nathalia / citologia) — não pertence a este repo ──
+dados.py
+requirements_laudos.txt
