@@ -362,5 +362,223 @@ def comparar_clinico_histo(ano_ini=None, ano_fim=None) -> dict:
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# IDADE POR DIAGNÓSTICO + TAMANHO (volume)
+# ─────────────────────────────────────────────────────────────────────────────
+
+import re as _re
+
+# Regex que entende "mm"/"cm" opcional entre os números (igual ao auditor):
+#   11mmx5mmx4mm, 22x17x3, 2,5 x 3 x 1, 10 cm x 5 cm x 2 cm
+_UNI = r"(?:\s*(?:mm|cm))?"
+_N = r"(\d+(?:[.,]\d+)?)"
+_U = r"(?:\s*(mm|cm))?"
+_PADRAO_MEDIDA_3D = _re.compile(
+    rf"{_N}{_U}\s*[xX×]\s*{_N}{_U}\s*[xX×]\s*{_N}{_U}"
+)
+
+
+def _para_mm_val(valor, unidade):
+    """Converte para mm (1 cm = 10 mm). Sem unidade = assume mm."""
+    if valor is None:
+        return None
+    v = float(valor.replace(",", "."))
+    return v * 10 if (unidade and unidade.lower() == "cm") else v
+
+
+def _idade_int(valor):
+    """Extrai a idade como número inteiro (ignora texto)."""
+    if not valor:
+        return None
+    m = _re.search(r"\d+", str(valor))
+    return int(m.group()) if m else None
+
+
+def prevalencia_por_diagnostico(termo_diag, campo="histo",
+                                idade_min=None, idade_max=None,
+                                ano_ini=None, ano_fim=None) -> dict:
+    """
+    Conta casos de um diagnóstico e quantos caem numa faixa etária.
+    campo: "histo" (histopatológico) ou "clinico".
+    """
+    coluna = "diagnostico_histopatologico" if campo == "histo" else "diagnostico_clinico"
+    f_sql, params = _filtro_periodo(ano_ini, ano_fim)
+    like = f"%{_sem_acento(termo_diag.strip())}%"
+
+    with conectar() as conn:
+        rows = conn.execute(
+            f'''SELECT "idade" AS idade FROM laudos
+                WHERE semacento("{coluna}") LIKE ? {f_sql}''',
+            [like] + params,
+        ).fetchall()
+
+    idades = [_idade_int(r["idade"]) for r in rows]
+    idades = [i for i in idades if i is not None]
+
+    total = len(rows)
+    com_idade = len(idades)
+    na_faixa = 0
+    if idade_min is not None and idade_max is not None:
+        na_faixa = sum(1 for i in idades if idade_min <= i <= idade_max)
+
+    media = round(sum(idades) / len(idades), 1) if idades else 0
+    return {
+        "total": total,
+        "com_idade": com_idade,
+        "na_faixa": na_faixa,
+        "media_idade": media,
+        "min_idade": min(idades) if idades else 0,
+        "max_idade": max(idades) if idades else 0,
+        "idades": idades,
+    }
+
+
+def distribuicao_idade(ano_ini=None, ano_fim=None,
+                       idade_min=None, idade_max=None, passo=10) -> dict:
+    """
+    Distribuição de idades agrupada em faixas de tamanho 'passo'.
+    Se idade_min/idade_max forem dados, filtra só esse intervalo.
+    Retorna faixas (lista) + total no intervalo.
+    """
+    f_sql, params = _filtro_periodo(ano_ini, ano_fim)
+    with conectar() as conn:
+        rows = conn.execute(
+            f'SELECT "idade" AS idade FROM laudos WHERE TRIM("idade") != \'\' {f_sql}',
+            params,
+        ).fetchall()
+
+    idades = []
+    for r in rows:
+        i = _idade_int(r["idade"])
+        if i is None:
+            continue
+        if idade_min is not None and i < idade_min:
+            continue
+        if idade_max is not None and i > idade_max:
+            continue
+        idades.append(i)
+
+    if not idades:
+        return {"faixas": [], "total": 0}
+
+    if passo <= 0:
+        passo = 10
+
+    # base do agrupamento: começa na idade_min (ou no múltiplo do passo)
+    base = idade_min if idade_min is not None else (min(idades) // passo) * passo
+
+    faixas = {}
+    for i in idades:
+        ini = base + ((i - base) // passo) * passo
+        chave = (ini, ini + passo - 1)
+        faixas[chave] = faixas.get(chave, 0) + 1
+
+    faixas_ord = sorted(faixas.items(), key=lambda x: x[0][0])
+    faixas_fmt = [(f"{int(a)}-{int(b)}", n) for (a, b), n in faixas_ord]
+
+    return {"faixas": faixas_fmt, "total": len(idades)}
+
+
+def tamanhos_por_diagnostico(termo_diag="", campo="histo",
+                             ano_ini=None, ano_fim=None) -> dict:
+    """
+    Extrai medidas (LxAxP) do aspecto macroscópico e calcula volume.
+    Retorna lista de (num_registro, volume, dimensões) ordenada por volume.
+    """
+    coluna = "diagnostico_histopatologico" if campo == "histo" else "diagnostico_clinico"
+    f_sql, params = _filtro_periodo(ano_ini, ano_fim)
+
+    cond = ""
+    if termo_diag.strip():
+        cond = f'AND semacento("{coluna}") LIKE ?'
+        params = [f"%{_sem_acento(termo_diag.strip())}%"] + params
+
+    with conectar() as conn:
+        rows = conn.execute(
+            f'''SELECT "num_registro" AS num, "aspecto_macroscopico" AS macro
+                FROM laudos
+                WHERE TRIM("aspecto_macroscopico") != '' {cond} {f_sql}''',
+            params,
+        ).fetchall()
+
+    com_volume = []
+    sem_3d = 0
+    for r in rows:
+        m = _PADRAO_MEDIDA_3D.search(r["macro"] or "")
+        if m:
+            # grupos: num1, uni1, num2, uni2, num3, uni3 — tudo convertido pra mm
+            a = _para_mm_val(m.group(1), m.group(2))
+            b = _para_mm_val(m.group(3), m.group(4))
+            c = _para_mm_val(m.group(5), m.group(6))
+            vol = round(a * b * c, 1)
+            # formata dimensões sem casas decimais quando inteiro
+            def _fmt(x):
+                return str(int(x)) if x == int(x) else str(x)
+            com_volume.append((r["num"], vol, f"{_fmt(a)}x{_fmt(b)}x{_fmt(c)}"))
+        else:
+            sem_3d += 1
+
+    com_volume.sort(key=lambda x: x[1])  # menor para maior
+    volumes = [v for _, v, _ in com_volume]
+
+    return {
+        "com_volume": com_volume,
+        "sem_3d": sem_3d,
+        "total": len(rows),
+        "media_vol": round(sum(volumes) / len(volumes), 1) if volumes else 0,
+        "min_vol": volumes[0] if volumes else 0,
+        "max_vol": volumes[-1] if volumes else 0,
+    }
+
+
+def distribuicao_volume_lesao(termo_diag, campo="histo", faixa=None,
+                              ano_ini=None, ano_fim=None) -> dict:
+    """
+    Distribuição dos volumes de UMA lesão, agrupados em faixas.
+    Se faixa=None, calcula uma faixa automática (~10 grupos).
+    Retorna faixas (lista de "ini-fim" + contagem) e os casos crus.
+    """
+    r = tamanhos_por_diagnostico(termo_diag, campo=campo,
+                                 ano_ini=ano_ini, ano_fim=ano_fim)
+    volumes = [v for _, v, _ in r["com_volume"]]
+
+    if not volumes:
+        return {"faixas": [], "casos": r["com_volume"], "sem_3d": r["sem_3d"],
+                "total": r["total"], "faixa_usada": 0,
+                "media_vol": 0, "min_vol": 0, "max_vol": 0}
+
+    vmax = max(volumes)
+    # faixa automática: divide o intervalo em ~10 grupos "redondos"
+    if not faixa or faixa <= 0:
+        bruto = vmax / 10 if vmax > 0 else 100
+        # arredonda para um número "bonito" (100, 200, 500, 1000...)
+        for opc in (50, 100, 200, 250, 500, 1000, 2000, 5000, 10000):
+            if bruto <= opc:
+                faixa = opc
+                break
+        else:
+            faixa = 10000
+
+    faixas = {}
+    for v in volumes:
+        ini = int(v // faixa) * faixa
+        chave = (ini, ini + faixa)
+        faixas[chave] = faixas.get(chave, 0) + 1
+
+    faixas_ord = sorted(faixas.items(), key=lambda x: x[0][0])
+    faixas_fmt = [(f"{int(ini)}-{int(fim)}", n) for (ini, fim), n in faixas_ord]
+
+    return {
+        "faixas": faixas_fmt,
+        "casos": r["com_volume"],
+        "sem_3d": r["sem_3d"],
+        "total": r["total"],
+        "faixa_usada": faixa,
+        "media_vol": r["media_vol"],
+        "min_vol": r["min_vol"],
+        "max_vol": r["max_vol"],
+    }
+
+
 # inicializa ao importar
 inicializar()
