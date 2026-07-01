@@ -38,7 +38,8 @@ CINZA_BORDA = colors.HexColor("#999999")
 CINZA_GRID = colors.HexColor("#cccccc")
 
 
-def _estilos():
+def _estilos(escala=1.0):
+    """escala: multiplicador do tamanho da fonte (1.0 = normal)."""
     base = getSampleStyleSheet()
     return {
         "titulo": ParagraphStyle("titulo", parent=base["Normal"],
@@ -51,10 +52,11 @@ def _estilos():
                                    fontName="Helvetica", fontSize=8,
                                    leading=10, alignment=TA_CENTER),
         "rotulo": ParagraphStyle("rotulo", parent=base["Normal"],
-                                 fontName="Helvetica-Bold", fontSize=7.5,
-                                 leading=9, textColor=AZUL),
+                                 fontName="Helvetica-Bold", fontSize=7.5 * escala,
+                                 leading=9 * escala, textColor=AZUL),
         "valor": ParagraphStyle("valor", parent=base["Normal"],
-                                fontName="Helvetica", fontSize=9.5, leading=12),
+                                fontName="Helvetica", fontSize=9.5 * escala,
+                                leading=12 * escala),
         "legenda": ParagraphStyle("legenda", parent=base["Normal"],
                                   fontName="Helvetica-Oblique", fontSize=10,
                                   leading=13, alignment=TA_CENTER),
@@ -65,13 +67,20 @@ def _estilos():
                                  fontName="Helvetica-Oblique", fontSize=8,
                                  leading=11, alignment=TA_JUSTIFY,
                                  textColor=colors.HexColor("#444444")),
+        "assinatura": ParagraphStyle("assinatura", parent=base["Normal"],
+                                     fontName="Helvetica", fontSize=9,
+                                     leading=11, alignment=TA_CENTER,
+                                     textColor=colors.HexColor("#333333")),
+        "_escala": escala,
     }
 
 
 def _campo(rotulo, valor, est):
     """Retorna UMA célula (Paragraph) com rótulo em cima e valor embaixo."""
+    escala = est.get("_escala", 1.0)
+    tam_rotulo = round(7.5 * escala, 1)
     v = str(valor).replace("\n", "<br/>") if valor else "&nbsp;"
-    txt = f'<font color="#1a3a6b" size="7.5"><b>{rotulo}</b></font><br/>{v}'
+    txt = f'<font color="#1a3a6b" size="{tam_rotulo}"><b>{rotulo}</b></font><br/>{v}'
     return Paragraph(txt, est["valor"])
 
 
@@ -79,10 +88,13 @@ def _tem_imagens(imagens):
     return imagens and any(item for item in imagens if item)
 
 
-def gerar_laudo_pdf(dados: dict, imagens: list = None) -> bytes:
+def gerar_laudo_pdf(dados: dict, imagens: list = None,
+                    escala_fonte: float = 1.0, logo_modo: str = "normal") -> bytes:
     """
     dados: campos do laudo.
     imagens: lista de tuplas (caminho, aumento). Só gera verso se houver.
+    escala_fonte: multiplicador do tamanho da fonte (1.0 = normal, 0.85 = menor, 1.15 = maior).
+    logo_modo: "normal", "pequena" ou "sem" (controla a imagem do topo).
     """
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -90,13 +102,14 @@ def gerar_laudo_pdf(dados: dict, imagens: list = None) -> bytes:
         topMargin=14 * mm, bottomMargin=14 * mm,
         leftMargin=16 * mm, rightMargin=16 * mm,
     )
-    est = _estilos()
+    est = _estilos(escala_fonte)
     story = []
     largura = doc.width
 
     # ── CABEÇALHO ──────────────────────────────────────────────────────────
-    if LOGO_PATH.exists():
-        logo_w = largura * 0.75
+    if LOGO_PATH.exists() and logo_modo != "sem":
+        proporcao = 0.75 if logo_modo == "normal" else 0.42  # pequena = 42%
+        logo_w = largura * proporcao
         logo_h = logo_w / 4.07
         logo = RLImage(str(LOGO_PATH), width=logo_w, height=logo_h)
         wrap = Table([[logo]], colWidths=[largura])
@@ -152,10 +165,16 @@ def gerar_laudo_pdf(dados: dict, imagens: list = None) -> bytes:
               [largura * 0.36, largura * 0.40, largura * 0.24]),
         linha([_campo("Aspecto Macroscópico:", dados.get("aspecto_macroscopico"), est)], [largura]),
         linha([_campo("Aspecto Microscópico:", dados.get("aspecto_microscopico"), est)], [largura]),
-        linha([_campo("Diagnóstico Histopatológico:", dados.get("diagnostico_histopatologico"), est)], [largura]),
-        linha([_campo("Patologista Responsável:", dados.get("patologista"), est)], [largura]),
-        linha([_campo("Observações:", dados.get("observacoes"), est)], [largura]),
+        linha([_campo("Diagnóstico Histopatológico:", dados.get("diagnostico_histopatologico"), est),
+               _campo("Patologista Responsável:", dados.get("patologista"), est)],
+              [largura * 0.6, largura * 0.4]),
     ]
+
+    # Observações: só entra no PDF se tiver conteúdo
+    if str(dados.get("observacoes", "")).strip():
+        blocos.append(
+            linha([_campo("Observações:", dados.get("observacoes"), est)], [largura])
+        )
 
     for b in blocos:
         story.append(b)
@@ -164,6 +183,21 @@ def gerar_laudo_pdf(dados: dict, imagens: list = None) -> bytes:
     # ── Texto padrão de rodapé (após Observações) ──────────────────────────
     story.append(Spacer(1, 3 * mm))
     story.append(Paragraph(TEXTO_RODAPE, est["rodape"]))
+
+    # ── Campo de Assinatura (espaço + linha para assinar) ──────────────────
+    story.append(Spacer(1, 14 * mm))  # espaço para colar/assinar
+    assinatura = Table(
+        [[""], [Paragraph("Assinatura", est["assinatura"])]],
+        colWidths=[largura * 0.6],
+    )
+    assinatura.setStyle(TableStyle([
+        ("LINEABOVE", (0, 1), (0, 1), 0.8, colors.HexColor("#333333")),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING", (0, 1), (0, 1), 2),
+    ]))
+    wrap_ass = Table([[assinatura]], colWidths=[largura])
+    wrap_ass.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
+    story.append(wrap_ass)
 
     # ── VERSO (só se houver imagens) ───────────────────────────────────────
     if _tem_imagens(imagens):
