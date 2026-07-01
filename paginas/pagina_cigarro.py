@@ -196,6 +196,48 @@ with col3:
 
 st.markdown("---")
 
+# ── Importar dados coletados no tablet (PWA) ────────────────────────────────
+with st.expander("📥 Importar dados do tablet (arquivo exportado do app)"):
+    st.caption(
+        "Selecione o arquivo `cigarro_AAAA-MM-DD.csv` que você exportou do "
+        "aplicativo do tablet. Os participantes serão adicionados aqui."
+    )
+    arquivo = st.file_uploader("Arquivo CSV do tablet:", type=["csv"], key="cig_upload")
+    if arquivo is not None:
+        try:
+            df_novo = pd.read_csv(arquivo, dtype=str, sep=";", keep_default_na=False)
+            df_atual = ler()
+
+            # garante colunas
+            for c in ["uuid"] + CAMPOS:
+                if c not in df_novo.columns:
+                    df_novo[c] = ""
+
+            # conta quantos são novos (uuid inédito) vs atualizações
+            uuids_atuais = set(df_atual["uuid"].values) if not df_atual.empty else set()
+            novos = df_novo[~df_novo["uuid"].isin(uuids_atuais)]
+            repetidos = df_novo[df_novo["uuid"].isin(uuids_atuais)]
+
+            st.info(
+                f"O arquivo tem **{len(df_novo)}** participante(s): "
+                f"{len(novos)} novo(s) e {len(repetidos)} já existente(s)."
+            )
+            if st.button("✅ Confirmar importação", type="primary"):
+                # adiciona os novos; atualiza os repetidos
+                df_final = df_atual.copy() if not df_atual.empty else pd.DataFrame(columns=["uuid"] + CAMPOS)
+                for _, linha in df_novo.iterrows():
+                    if linha["uuid"] in uuids_atuais:
+                        idx = df_final[df_final["uuid"] == linha["uuid"]].index[0]
+                        for c in ["uuid"] + CAMPOS:
+                            df_final.at[idx, c] = linha.get(c, "")
+                    else:
+                        df_final = pd.concat([df_final, pd.DataFrame([linha])], ignore_index=True)
+                df_final.to_csv(ARQUIVO, index=False, encoding="utf-8-sig")
+                st.success(f"✅ {len(novos)} novo(s) importado(s), {len(repetidos)} atualizado(s)!")
+                st.rerun()
+        except Exception as e:
+            st.error(f"Erro ao ler o arquivo: {e}")
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # QUESTIONÁRIO
