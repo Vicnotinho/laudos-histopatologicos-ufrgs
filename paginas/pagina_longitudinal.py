@@ -32,25 +32,8 @@ ARQUIVO_COLETAS   = PASTA_DADOS / "coletas.csv"
 
 # ── Opções dos comboboxes ─────────────────────────────────────────────────
 OPC_GENERO     = ["", "Feminino", "Masculino"]
-OPC_FUMA       = ["", "Não", "Sim", "Ex-fumante"]
-OPC_BEBE       = ["", "Bebe", "Não bebe", "Não bebe mais"]
-OPC_GRUPO      = ["", "Controle", "Desordem potencialmente maligna bucal", "Carcinoma Espinocelular"]
-OPC_LESAO      = [
-    "",
-    "Placa branca",
-    "Placa branca com áreas eritroplásicas ulceradas",
-    "Placa branca/avermelhada onde teve CECB há 15 anos",
-    "Placa branca delgada",
-    "Região eritematosa",
-    "Eritroplasia",
-]
-OPC_LOCALIZACAO = [
-    "",
-    "Dorso da língua",
-    "Assoalho da boca",
-    "Borda da língua",
-    "Língua",
-]
+OPC_SIMNAO     = ["", "Sim", "Não"]
+OPC_GRUPO      = ["", "Controle", "Desordem potencialmente maligna bucal", "Carcinoma Espinocelular", "Exposto"]
 OPC_SUPERFICIE = ["", "Homogênea", "Não homogênea"]
 OPC_COR        = ["", "Branca", "Mista", "Avermelhada"]
 
@@ -59,11 +42,13 @@ CAMPOS_PACIENTE = ["nome", "data_nascimento", "telefone", "genero", "registros_p
 
 CAMPOS_COLETA = [
     "num_registro", "data_coleta", "grupo", "tempo_anterior",
-    # hábitos
-    "fuma", "cigarros_por_dia", "bebe", "latas_por_dia",
-    # lesão
-    "lesao_clinica",
-    "localizacao_1", "localizacao_2", "localizacao_3",
+    # hábitos — álcool
+    "alc_usa", "alc_tipo", "alc_unidades", "alc_obs",
+    # hábitos — tabaco
+    "tab_usa", "tab_semana", "tab_ano", "tab_obs",
+    # lesão (agora texto livre)
+    "lesao_clinica", "localizacao",
+    "num_lamina", "diagnostico_histo", "papanicolau_resultado",
     "superficie", "cor",
     # papa convencional
     "papac_data", "papac_reg", "papac_drive",
@@ -219,8 +204,6 @@ def carregar_paciente(uuid_):
         st.session_state[k] = ultima.get(k, "") or ""
 
     # restaura checkboxes/expansões a partir dos dados
-    st.session_state.tem_loc2 = bool(st.session_state.get("localizacao_2", ""))
-    st.session_state.tem_loc3 = bool(st.session_state.get("localizacao_3", ""))
 
 
 def carregar_registro(uuid_paciente, t):
@@ -244,8 +227,6 @@ def carregar_registro(uuid_paciente, t):
     for k in CAMPOS_COLETA:
         st.session_state[k] = row_c.get(k, "") or ""
 
-    st.session_state.tem_loc2 = bool(st.session_state.get("localizacao_2", ""))
-    st.session_state.tem_loc3 = bool(st.session_state.get("localizacao_3", ""))
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -263,16 +244,12 @@ def novo_paciente():
     st.session_state.long_coleta_atual = 0
     for k in CAMPOS_PACIENTE + CAMPOS_COLETA:
         st.session_state.pop(k, None)
-    st.session_state.pop("tem_loc2", None)
-    st.session_state.pop("tem_loc3", None)
 
 
 def nova_coleta():
     st.session_state.long_coleta_atual += 1
     for k in CAMPOS_COLETA:
         st.session_state.pop(k, None)
-    st.session_state.pop("tem_loc2", None)
-    st.session_state.pop("tem_loc3", None)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -503,81 +480,69 @@ with tab_paciente:
 
     # ── Hábitos ────────────────────────────────────────────────────────────
     st.markdown("### Hábitos")
+
+    st.markdown("**🍺 Álcool**")
     col1, col2 = st.columns(2)
     with col1:
         st.selectbox(
-            "Fumante:", OPC_FUMA,
-            index=safe_index(OPC_FUMA, st.session_state.get("fuma", "")),
-            key="fuma",
+            "Consome álcool?", OPC_SIMNAO,
+            index=safe_index(OPC_SIMNAO, st.session_state.get("alc_usa", "")),
+            key="alc_usa",
         )
-        if st.session_state.get("fuma") in ("Sim", "Ex-fumante"):
-            st.text_input("Quantos cigarros por dia:", key="cigarros_por_dia")
-        else:
-            st.session_state["cigarros_por_dia"] = ""
-
+        st.text_input("Tipo de bebida:", key="alc_tipo",
+                      placeholder="Ex: Destilados, cerveja...")
     with col2:
+        st.text_input("Unidades de álcool/semana:", key="alc_unidades",
+                      placeholder="Ex: 400")
+        st.text_input("Observações (álcool):", key="alc_obs",
+                      placeholder="Ex: Raramente, cachaça")
+
+    st.markdown("**🚬 Tabaco**")
+    col1, col2 = st.columns(2)
+    with col1:
         st.selectbox(
-            "Álcool:", OPC_BEBE,
-            index=safe_index(OPC_BEBE, st.session_state.get("bebe", "")),
-            key="bebe",
+            "Usa tabaco?", OPC_SIMNAO,
+            index=safe_index(OPC_SIMNAO, st.session_state.get("tab_usa", "")),
+            key="tab_usa",
         )
-        if st.session_state.get("bebe") in ("Bebe", "Não bebe mais"):
-            st.text_input("Quantas latas por dia:", key="latas_por_dia")
-        else:
-            st.session_state["latas_por_dia"] = ""
+        st.text_input("Carteiras/semana:", key="tab_semana", placeholder="Ex: 14")
+    with col2:
+        st.text_input("Carteiras/ano:", key="tab_ano", placeholder="Ex: 728")
+        st.text_input("Observações (tabaco):", key="tab_obs",
+                      placeholder="Ex: Sim, fuma 30 cig/dia")
 
     # ── Lesão ──────────────────────────────────────────────────────────────
     st.markdown("### Lesão")
-    st.selectbox(
-        "Lesão clínica:", OPC_LESAO,
-        index=safe_index(OPC_LESAO, st.session_state.get("lesao_clinica", "")),
-        key="lesao_clinica",
+    st.text_area(
+        "Lesão clínica:", key="lesao_clinica", height=70,
+        placeholder="Descrição livre. Ex: Placa branca rugosa medindo 1,5 cm x 1,5 cm",
+    )
+    st.text_area(
+        "Localização:", key="localizacao", height=70,
+        placeholder="Ex: Borda de língua (lado direito)/assoalho bucal",
     )
 
-    st.selectbox(
-        "Localização:", OPC_LOCALIZACAO,
-        index=safe_index(OPC_LOCALIZACAO, st.session_state.get("localizacao_1", "")),
-        key="localizacao_1",
-    )
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.text_input("Número da lâmina:", key="num_lamina",
+                      placeholder="Ex: 31268/18")
+    with col2:
+        st.text_input("Diagnóstico histopatológico:", key="diagnostico_histo",
+                      placeholder="Ex: Displasia epitelial")
+    with col3:
+        st.text_input("Papanicolau (resultado):", key="papanicolau_resultado")
 
-    if "tem_loc2" not in st.session_state:
-        st.session_state.tem_loc2 = bool(st.session_state.get("localizacao_2", ""))
-    st.checkbox("É mais de uma região?", key="tem_loc2")
-
-    if st.session_state.tem_loc2:
-        st.selectbox(
-            "Segunda localização:", OPC_LOCALIZACAO,
-            index=safe_index(OPC_LOCALIZACAO, st.session_state.get("localizacao_2", "")),
-            key="localizacao_2",
-        )
-
-        if "tem_loc3" not in st.session_state:
-            st.session_state.tem_loc3 = bool(st.session_state.get("localizacao_3", ""))
-        st.checkbox("Existe uma terceira região?", key="tem_loc3")
-
-        if st.session_state.tem_loc3:
-            st.selectbox(
-                "Terceira localização:", OPC_LOCALIZACAO,
-                index=safe_index(OPC_LOCALIZACAO, st.session_state.get("localizacao_3", "")),
-                key="localizacao_3",
-            )
-        else:
-            st.session_state["localizacao_3"] = ""
-    else:
-        st.session_state["localizacao_2"] = ""
-        st.session_state["localizacao_3"] = ""
-
-    # Superfície e Cor da lesão (alimentam o multicategórico)
+    # Superfície e Cor (opcionais — podem ficar em branco)
     col1, col2 = st.columns(2)
     with col1:
         st.selectbox(
-            "Superfície:", OPC_SUPERFICIE,
+            "Superfície (opcional):", OPC_SUPERFICIE,
             index=safe_index(OPC_SUPERFICIE, st.session_state.get("superficie", "")),
             key="superficie",
         )
     with col2:
         st.selectbox(
-            "Cor:", OPC_COR,
+            "Cor (opcional):", OPC_COR,
             index=safe_index(OPC_COR, st.session_state.get("cor", "")),
             key="cor",
         )
@@ -755,17 +720,17 @@ with tab_multi:
     # ── Leitura dos dados das outras abas ──────────────────────────────────
     genero = st.session_state.get("genero", "")
     idade  = calcular_idade(st.session_state.get("data_nascimento", ""))
-    fuma   = st.session_state.get("fuma", "")
-    bebe   = st.session_state.get("bebe", "")
-    loc1   = st.session_state.get("localizacao_1", "")
+    fuma   = st.session_state.get("tab_usa", "")
+    bebe   = st.session_state.get("alc_usa", "")
+    loc1   = st.session_state.get("localizacao", "")
 
     # Pontuação Anamnese
     pts_genero = {"Feminino": 1, "Masculino": 2}
     p_gen   = pts_genero.get(genero, 0)
     p_idade = 1 if (idade is not None and idade < 50) else (2 if idade is not None else 0)
 
-    fuma_ativo = fuma in ("Sim", "Ex-fumante")
-    bebe_ativo = bebe and bebe != "Não bebe"
+    fuma_ativo = fuma == "Sim"
+    bebe_ativo = bebe == "Sim"
     if fuma_ativo and bebe_ativo:
         fator_txt, fator_pts = "Fumo + álcool", 2
     elif fuma_ativo:
@@ -787,7 +752,8 @@ with tab_multi:
     # ── EXAME FÍSICO ───────────────────────────────────────────────────────
     st.markdown("#### 🔍 Exame Físico")
 
-    if loc1 in ("Assoalho da boca", "Língua", "Borda da língua", "Dorso da língua"):
+    loc_lower = loc1.lower()
+    if any(t in loc_lower for t in ["assoalho", "língua", "lingua", "soalho"]):
         p_loc, loc_txt = 2, "Soalho/língua"
     elif loc1:
         p_loc, loc_txt = 1, "Outros"
