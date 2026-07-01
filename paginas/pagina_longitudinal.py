@@ -364,6 +364,64 @@ with st.sidebar:
 st.title("🔬 Longitudinal")
 st.caption(f"🆔 UUID do paciente: `{st.session_state.long_paciente_uuid}`")
 
+# ── Importar dados coletados no tablet (PWA) ────────────────────────────────
+with st.expander("📥 Importar dados do tablet (2 arquivos exportados do app)"):
+    st.caption(
+        "Selecione os DOIS arquivos exportados do aplicativo do tablet: "
+        "`longitudinal_pacientes_...csv` e `longitudinal_coletas_...csv`."
+    )
+    up_pac = st.file_uploader("Arquivo de PACIENTES:", type=["csv"], key="long_up_pac")
+    up_col = st.file_uploader("Arquivo de COLETAS:", type=["csv"], key="long_up_col")
+
+    if up_pac is not None and up_col is not None:
+        try:
+            df_pac_novo = pd.read_csv(up_pac, dtype=str, sep=";", keep_default_na=False)
+            df_col_novo = pd.read_csv(up_col, dtype=str, sep=";", keep_default_na=False)
+            df_pac_atual = ler_pacientes()
+            df_col_atual = ler_coletas()
+
+            uuids_atuais = set(df_pac_atual["uuid"].values) if not df_pac_atual.empty else set()
+            novos_pac = df_pac_novo[~df_pac_novo["uuid"].isin(uuids_atuais)]
+
+            st.info(
+                f"O arquivo tem **{len(df_pac_novo)}** paciente(s) e "
+                f"**{len(df_col_novo)}** coleta(s). "
+                f"{len(novos_pac)} paciente(s) novo(s)."
+            )
+            if st.button("✅ Confirmar importação", type="primary"):
+                # pacientes: adiciona novos / atualiza existentes
+                df_pac_final = df_pac_atual.copy() if not df_pac_atual.empty else pd.DataFrame(columns=["uuid"] + CAMPOS_PACIENTE)
+                for _, linha in df_pac_novo.iterrows():
+                    if linha["uuid"] in uuids_atuais:
+                        idx = df_pac_final[df_pac_final["uuid"] == linha["uuid"]].index[0]
+                        for c in linha.index:
+                            df_pac_final.at[idx, c] = linha[c]
+                    else:
+                        df_pac_final = pd.concat([df_pac_final, pd.DataFrame([linha])], ignore_index=True)
+                df_pac_final.to_csv(ARQUIVO_PACIENTES, index=False, encoding="utf-8-sig")
+
+                # coletas: substitui por uuid_paciente + t
+                df_col_final = df_col_atual.copy() if not df_col_atual.empty else pd.DataFrame(columns=["uuid_paciente", "t"] + CAMPOS_COLETA)
+                for _, linha in df_col_novo.iterrows():
+                    if not df_col_final.empty:
+                        mask = (df_col_final["uuid_paciente"] == linha["uuid_paciente"]) & (df_col_final["t"] == linha["t"])
+                        existente = df_col_final[mask]
+                    else:
+                        existente = pd.DataFrame()
+                    if not existente.empty:
+                        idx = existente.index[0]
+                        for c in linha.index:
+                            df_col_final.at[idx, c] = linha[c]
+                    else:
+                        df_col_final = pd.concat([df_col_final, pd.DataFrame([linha])], ignore_index=True)
+                df_col_final.to_csv(ARQUIVO_COLETAS, index=False, encoding="utf-8-sig")
+
+                st.success(f"✅ Importado! {len(novos_pac)} paciente(s) novo(s) e {len(df_col_novo)} coleta(s).")
+                st.rerun()
+        except Exception as e:
+            st.error(f"Erro ao ler os arquivos: {e}")
+
+
 col1, col2, col3, col4, col5, col6 = st.columns([3, 1.5, 1.5, 1.5, 1.1, 1.3])
 with col1:
     st.text_input("Nome:", key="nome")
