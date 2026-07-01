@@ -74,6 +74,7 @@ def novo_laudo():
     # desmarca os checkboxes de foto
     st.session_state["chk_foto_clinica"] = False
     st.session_state["chk_foto_biopsia"] = False
+    st.session_state["chk_foto_radiografica"] = False
     st.session_state.imagens_verso = []
 
 
@@ -87,6 +88,7 @@ def carregar(uuid_):
     # sincroniza os checkboxes de foto (banco guarda "0"/"1")
     st.session_state["chk_foto_clinica"] = (str(dados.get("tem_foto_clinica", "")) == "1")
     st.session_state["chk_foto_biopsia"] = (str(dados.get("tem_foto_biopsia", "")) == "1")
+    st.session_state["chk_foto_radiografica"] = (str(dados.get("tem_foto_radiografica", "")) == "1")
     # garante que valores de selectbox fora da lista não quebrem o widget
     if st.session_state.get("genero", "") not in OPC_GENERO:
         OPC_GENERO.append(st.session_state["genero"])
@@ -109,6 +111,7 @@ def salvar():
     # checkboxes de foto → "0"/"1"
     dados["tem_foto_clinica"] = "1" if st.session_state.get("chk_foto_clinica") else "0"
     dados["tem_foto_biopsia"] = "1" if st.session_state.get("chk_foto_biopsia") else "0"
+    dados["tem_foto_radiografica"] = "1" if st.session_state.get("chk_foto_radiografica") else "0"
     dados["origem"] = "manual"
     banco.salvar_laudo(uuid_, dados)
     banco.registrar_log(st.session_state.usuario_logado, "criou" if novo else "editou", num)
@@ -300,7 +303,7 @@ with tab_dados:
     # ── Registro de fotos (controle de acervo) ─────────────────────────────
     st.markdown("### Acervo de Fotos")
     st.caption("Marque se este caso possui fotos guardadas (ex: no HD externo da patologia).")
-    cfa, cfb = st.columns(2)
+    cfa, cfb, cfc = st.columns(3)
     with cfa:
         if "chk_foto_clinica" not in st.session_state:
             st.session_state["chk_foto_clinica"] = False
@@ -308,7 +311,11 @@ with tab_dados:
     with cfb:
         if "chk_foto_biopsia" not in st.session_state:
             st.session_state["chk_foto_biopsia"] = False
-        st.checkbox("🔬 Tem foto da biópsia", key="chk_foto_biopsia")
+        st.checkbox("🔬 Tem foto histopatológica", key="chk_foto_biopsia")
+    with cfc:
+        if "chk_foto_radiografica" not in st.session_state:
+            st.session_state["chk_foto_radiografica"] = False
+        st.checkbox("🦴 Tem foto radiográfica", key="chk_foto_radiografica")
 
     st.markdown("---")
     st.button("💾 Salvar Laudo", on_click=salvar, type="primary", key="save_dados", width='stretch')
@@ -367,6 +374,22 @@ with tab_imagens:
 with tab_pdf:
     st.markdown("### Gerar PDF do Laudo")
 
+    st.caption("Ajuste o tamanho para caber tudo em uma folha, se precisar.")
+    colf, coll = st.columns(2)
+    with colf:
+        tam_fonte = st.number_input(
+            "Tamanho da fonte (%):",
+            min_value=60, max_value=140, value=100, step=5,
+            help="100 = normal. Diminua se o laudo não couber em uma folha.",
+        )
+    with coll:
+        logo_opcao = st.radio(
+            "Imagem do topo (Laboratório de Patologia):",
+            ["Normal", "Pequena", "Sem imagem"],
+            horizontal=True,
+        )
+    mapa_logo = {"Normal": "normal", "Pequena": "pequena", "Sem imagem": "sem"}
+
     if st.button("📄 Gerar PDF", type="primary"):
         dados = {c: st.session_state.get(c, "") for c in CAMPOS_FORM}
         imagens = []
@@ -376,7 +399,11 @@ with tab_pdf:
             imagens.append((str(caminho), img["aumento"]))
 
         try:
-            pdf_bytes = gerar_laudo_pdf(dados, imagens)
+            pdf_bytes = gerar_laudo_pdf(
+                dados, imagens,
+                escala_fonte=tam_fonte / 100,
+                logo_modo=mapa_logo[logo_opcao],
+            )
             banco.registrar_log(st.session_state.usuario_logado, "gerou PDF", dados.get("num_registro", ""))
             st.download_button(
                 "⬇️ Baixar PDF", data=pdf_bytes,
