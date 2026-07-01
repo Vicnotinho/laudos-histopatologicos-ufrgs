@@ -22,7 +22,7 @@ CAMPOS = [
     "tipo_biopsia", "localizacao", "diagnostico_clinico",
     "aspecto_macroscopico", "aspecto_microscopico",
     "diagnostico_histopatologico", "patologista", "observacoes",
-    "tem_foto_clinica", "tem_foto_biopsia",
+    "tem_foto_clinica", "tem_foto_biopsia", "tem_foto_radiografica",
     "origem",
 ]
 
@@ -182,6 +182,48 @@ def contar_busca(termo: str = "") -> int:
 def contar() -> int:
     with conectar() as conn:
         return conn.execute("SELECT COUNT(*) FROM laudos").fetchone()[0]
+
+
+def laudos_com_fotos() -> list[dict]:
+    """
+    Retorna os laudos que têm pelo menos uma foto marcada,
+    com o tipo de cada foto. Ordenado por número de registro.
+    """
+    with conectar() as conn:
+        rows = conn.execute(
+            '''SELECT "num_registro" AS num, "nome" AS nome,
+                      "tem_foto_clinica" AS clinica,
+                      "tem_foto_biopsia" AS biopsia,
+                      "tem_foto_radiografica" AS radiografica
+               FROM laudos
+               WHERE "tem_foto_clinica" = '1'
+                  OR "tem_foto_biopsia" = '1'
+                  OR "tem_foto_radiografica" = '1' '''
+        ).fetchall()
+
+    resultado = []
+    for r in rows:
+        tipos = []
+        if str(r["clinica"]) == "1":
+            tipos.append("Clínica")
+        if str(r["biopsia"]) == "1":
+            tipos.append("Histopatológica")
+        if str(r["radiografica"]) == "1":
+            tipos.append("Radiográfica")
+        resultado.append({
+            "num": r["num"] or "(sem nº)",
+            "nome": r["nome"] or "(sem nome)",
+            "tipos": tipos,
+        })
+
+    # ordena por número de registro (numérico quando possível)
+    def chave(item):
+        try:
+            return (0, int(item["num"]))
+        except (ValueError, TypeError):
+            return (1, item["num"])
+    resultado.sort(key=chave)
+    return resultado
 
 
 # ─────────────────────────────────────────────────────────────────────────────
