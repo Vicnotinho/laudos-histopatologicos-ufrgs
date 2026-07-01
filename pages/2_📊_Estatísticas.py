@@ -15,8 +15,6 @@ import streamlit as st
 import pandas as pd
 import banco
 
-st.set_page_config(page_title="Estatísticas – Laudos UFRGS", layout="wide")
-
 # ── Proteção: exige login feito na página principal ─────────────────────────
 if not st.session_state.get("usuario_logado"):
     st.warning("🔒 Faça login na página principal (Laudos) para acessar as estatísticas.")
